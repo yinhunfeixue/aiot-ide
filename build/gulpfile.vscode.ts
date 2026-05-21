@@ -519,10 +519,23 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 	return task;
 }
 
+const hasSigntool = (() => {
+	let result: boolean | undefined;
+	return () => {
+		if (result === undefined) {
+			result = cp.spawnSync('where', ['signtool.exe']).status === 0;
+		}
+		return result;
+	};
+})();
+
 function hasAuthenticodeSignature(filePath: string): Promise<boolean> {
-	return new Promise((resolve, reject) => {
+	if (!hasSigntool()) {
+		return Promise.resolve(false);
+	}
+	return new Promise((resolve) => {
 		const proc = cp.spawn('signtool.exe', ['verify', '/pa', filePath]);
-		proc.on('error', reject);
+		proc.on('error', () => resolve(false));
 		proc.on('exit', code => resolve(code === 0));
 	});
 }
