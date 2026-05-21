@@ -1,0 +1,30 @@
+name: Upload to Release
+description: Create or update a GitHub Release and upload assets
+
+inputs:
+  ref:
+    description: 'Tag version (e.g. 1.0.0)'
+    required: true
+  file:
+    description: 'File to upload'
+    required: true
+  github_token:
+    description: 'GitHub token'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Upload to release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        TAG="v${{ inputs.ref }}"
+        if ! gh release view "${TAG}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+          gh release create "${TAG}" \
+            --repo "${{ github.repository }}" \
+            --title "Release ${TAG}" \
+            --notes ""
+        fi
+        gh release upload "${TAG}" "${{ inputs.file }}" --repo "${{ github.repository }}" --clobber

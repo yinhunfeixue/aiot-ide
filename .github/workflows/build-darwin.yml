@@ -1,0 +1,99 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag to build (e.g. 1.0.0)'
+        required: true
+      create_release:
+        description: 'Create GitHub Release'
+        required: true
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Tag to build'
+        required: true
+        type: string
+      create_release:
+        description: 'Create GitHub Release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runner }}
+    name: build (${{ matrix.vscode_arch }})
+    permissions:
+      contents: write
+    env:
+      VSCODE_ARCH: ${{ matrix.vscode_arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            vscode_arch: x64
+          - runner: macos-15
+            vscode_arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Setup Python 3
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python setuptools
+        run: python3 -m pip install setuptools
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          npm_config_arch: ${{ matrix.vscode_arch }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        run: npm run gulp vscode-darwin-${{ matrix.vscode_arch }}
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build tunnel CLI
+        uses: ./.github/actions/build-tunnel-cli
+        with:
+          vscode_arch: ${{ matrix.vscode_arch }}
+
+      - name: List build output
+        run: ls -la "../VSCode-darwin-${VSCODE_ARCH}/" | head -20
+
+      - name: Package
+        run: |
+          cd "../VSCode-darwin-${VSCODE_ARCH}"
+          zip -r -X -y "${{ github.workspace }}/aiot-ide-darwin-${VSCODE_ARCH}.zip" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiot-ide-darwin-${{ matrix.vscode_arch }}
+          path: aiot-ide-darwin-${{ matrix.vscode_arch }}.zip
+
+      - name: Upload to release
+        if: inputs.create_release == true
+        uses: ./.github/actions/upload-release
+        with:
+          ref: ${{ inputs.ref }}
+          file: aiot-ide-darwin-${{ matrix.vscode_arch }}.zip
+          github_token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,116 @@
+name: Build Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag to build (e.g. 1.0.0)'
+        required: true
+      create_release:
+        description: 'Create GitHub Release'
+        required: true
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Tag to build'
+        required: true
+        type: string
+      create_release:
+        description: 'Create GitHub Release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    name: build (${{ matrix.vscode_arch }})
+    permissions:
+      contents: write
+    env:
+      VSCODE_ARCH: ${{ matrix.vscode_arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - vscode_arch: x64
+            deb_arch: amd64
+          - vscode_arch: arm64
+            deb_arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Setup Python 3
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python setuptools
+        run: python3 -m pip install setuptools
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential g++ libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev python-is-python3 fakeroot rpm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          npm_config_arch: ${{ matrix.vscode_arch }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cross-compile tools
+        if: matrix.vscode_arch == 'arm64'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Build
+        run: npm run gulp vscode-linux-${{ matrix.vscode_arch }}-min
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build tunnel CLI
+        uses: ./.github/actions/build-tunnel-cli
+        with:
+          vscode_arch: ${{ matrix.vscode_arch }}
+
+      - name: Build deb package
+        run: |
+          npm run gulp vscode-linux-${{ matrix.vscode_arch }}-prepare-deb
+          npm run gulp vscode-linux-${{ matrix.vscode_arch }}-build-deb
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List build output
+        run: find .build/linux/deb -type f -name "*.deb" 2>/dev/null || true
+
+      - name: Package
+        run: |
+          DEB_FILE=$(ls .build/linux/deb/${{ matrix.deb_arch }}/deb/*.deb | head -1)
+          cp "${DEB_FILE}" "./aiot-ide-linux-${{ matrix.vscode_arch }}.deb"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiot-ide-linux-${{ matrix.vscode_arch }}
+          path: aiot-ide-linux-${{ matrix.vscode_arch }}.deb
+
+      - name: Upload to release
+        if: inputs.create_release == true
+        uses: ./.github/actions/upload-release
+        with:
+          ref: ${{ inputs.ref }}
+          file: aiot-ide-linux-${{ matrix.vscode_arch }}.deb
+          github_token: ${{ secrets.GITHUB_TOKEN }}

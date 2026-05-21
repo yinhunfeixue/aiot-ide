@@ -1,0 +1,106 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag to build (e.g. 1.0.0)'
+        required: true
+      create_release:
+        description: 'Create GitHub Release'
+        required: true
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Tag to build'
+        required: true
+        type: string
+      create_release:
+        description: 'Create GitHub Release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    name: build (${{ matrix.vscode_arch }})
+    permissions:
+      contents: write
+    env:
+      VSCODE_ARCH: ${{ matrix.vscode_arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - vscode_arch: x64
+          - vscode_arch: arm64
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Setup Python 3
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python setuptools
+        run: python3 -m pip install setuptools
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          npm_config_arch: ${{ matrix.vscode_arch }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        run: npm run gulp vscode-win32-${{ matrix.vscode_arch }}-min
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build tunnel CLI
+        uses: ./.github/actions/build-tunnel-cli
+        with:
+          vscode_arch: ${{ matrix.vscode_arch }}
+
+      - name: Build setup
+        run: |
+          npm run gulp vscode-win32-${{ matrix.vscode_arch }}-inno-updater
+          npm run gulp vscode-win32-${{ matrix.vscode_arch }}-user-setup
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List build output
+        run: find .build/win32-${VSCODE_ARCH} -type f -name "*.exe" 2>/dev/null || true
+
+      - name: Package
+        run: cp ".build/win32-${VSCODE_ARCH}/user-setup/VSCodeSetup.exe" "./aiot-ide-win32-${VSCODE_ARCH}-setup.exe"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiot-ide-win32-${{ matrix.vscode_arch }}
+          path: aiot-ide-win32-${{ matrix.vscode_arch }}-setup.exe
+
+      - name: Upload to release
+        if: inputs.create_release == true
+        uses: ./.github/actions/upload-release
+        with:
+          ref: ${{ inputs.ref }}
+          file: aiot-ide-win32-${{ matrix.vscode_arch }}-setup.exe
+          github_token: ${{ secrets.GITHUB_TOKEN }}

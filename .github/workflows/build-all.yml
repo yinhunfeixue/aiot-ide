@@ -1,0 +1,35 @@
+name: Build All Platforms & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag to build (e.g. 1.0.0)'
+        required: true
+      create_release:
+        description: 'Create GitHub Release'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build-darwin:
+    uses: ./.github/workflows/build-darwin.yml
+    with:
+      ref: ${{ inputs.ref }}
+      create_release: ${{ inputs.create_release }}
+    secrets: inherit
+
+  build-linux:
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      ref: ${{ inputs.ref }}
+      create_release: ${{ inputs.create_release }}
+    secrets: inherit
+
+  build-windows:
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      ref: ${{ inputs.ref }}
+      create_release: ${{ inputs.create_release }}
+    secrets: inherit
